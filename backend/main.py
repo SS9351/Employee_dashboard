@@ -37,13 +37,9 @@ def health_check():
 @app.get("/api/init-admin")
 def setup_admin():
     try:
-        import init_db
         import seed_employees
         
-        # Initialize DB (creates tables and default admin if missing)
-        init_db.init_db()
-        
-        # Run the mass-injection script to create the 6 user accounts
+        # Run the mass-injection script to create the Admin + 6 normal accounts
         seed_employees.seed_users()
         return {"status": "success", "message": "Admin user and all 6 Employee accounts firmly injected into live production database."}
     except Exception as e:

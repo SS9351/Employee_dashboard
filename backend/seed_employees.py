@@ -11,6 +11,7 @@ def seed_users():
     db = SessionLocal()
     
     users_to_add = [
+        {"username": "admin", "email": "admin@sahastra.in", "full_name": "System Administrator", "is_admin": True, "password": "admin123"},
         {"username": "Sneha", "email": "Sneha@sahastra.in", "full_name": "Sneha Patil", "is_admin": False, "password": "password123"},
         {"username": "Akansha", "email": "Akansha@sahastra.in", "full_name": "Akansha gurav", "is_admin": False, "password": "password123"},
         {"username": "Durga", "email": "Durga@sahastra.in", "full_name": "Durga ungle", "is_admin": False, "password": "password123"},
