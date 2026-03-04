@@ -4,10 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from api import router
 
-# Create DB Schema
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="Sahastra Attendance Backend")
+
+@app.on_event("startup")
+def startup_event():
+    # Create DB Schema safely after app boot
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Failed to create schema automatically: {e}")
 
 app.add_middleware(
     CORSMiddleware,
