@@ -15,4 +15,11 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
+export const adminApi = {
+    toggleAdmin: (userId) => api.post(`/admin/users/${userId}/toggle-admin`),
+    terminateSession: (attendanceId) => api.post(`/admin/attendance/${attendanceId}/terminate`),
+    exportToExcel: () => api.get('/admin/export-excel', { responseType: 'blob' }),
+    deleteLogs: () => api.delete('/admin/logs')
+};
+
 export default api;

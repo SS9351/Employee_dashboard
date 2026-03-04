@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import StreamingResponse
+import pandas as pd
+from io import BytesIO
 
 from sqlalchemy.orm import Session
 
@@ -10,7 +13,7 @@ from auth import verify_password, create_access_token, decode_access_token, get_
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import datetime
 from sqlalchemy import desc
-
+from ist_helper import get_ist_now
 
 router = APIRouter()
 
@@ -82,7 +85,7 @@ def login(request: Request, payload: dict, db: Session = Depends(get_db)):
     attendance = Attendance(
         user_id=user.id,
 
-        login_time=datetime.datetime.utcnow(),
+        login_time=get_ist_now(),
 
         hostname=device_info.get("hostname", ""),
 
@@ -113,7 +116,7 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
 
     # Mark logout time for most recent login today
 
-    today_start = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0)
+    today_start = get_ist_now().replace(hour=0, minute=0, second=0)
 
     attendance = db.query(Attendance).filter(
 
@@ -127,7 +130,7 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
 
     if attendance:
 
-        attendance.logout_time = datetime.datetime.utcnow()
+        attendance.logout_time = get_ist_now()
 
         db.commit()
     
@@ -231,9 +234,9 @@ def apply_leave(payload: dict, current_user: User = Depends(get_current_user), d
 
     except:
 
-        start_date = datetime.datetime.utcnow()
+        start_date = get_ist_now()
 
-        end_date = datetime.datetime.utcnow()
+        end_date = get_ist_now()
 
 
     leave = LeaveRequest(
@@ -267,7 +270,7 @@ def sync_activity(payload: dict, current_user: User = Depends(get_current_user),
 
         except:
 
-            ts = datetime.datetime.utcnow()
+            ts = get_ist_now()
             
 
         app_log = AppLog(
@@ -306,6 +309,20 @@ def get_all_users(current_user: User = Depends(get_current_user), db: Session = 
             "is_active": u.is_active
         })
     return {"users": result}
+
+@router.post("/admin/users/{user_id}/toggle-admin")
+def toggle_admin_status(user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.is_admin = not user.is_admin
+    db.commit()
+    
+    return {"message": f"User {user.username} admin status changed to {user.is_admin}", "is_admin": user.is_admin}
     
 @router.get("/admin/reset-requests")
 def get_reset_requests(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -412,7 +429,7 @@ def get_all_attendance(current_user: User = Depends(get_current_user), db: Sessi
 
     # Get all attendance records from today
 
-    today_start = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0)
+    today_start = get_ist_now().replace(hour=0, minute=0, second=0)
 
     records = db.query(Attendance).filter(Attendance.login_time >= today_start).order_by(Attendance.login_time.desc()).all()
     
@@ -422,6 +439,7 @@ def get_all_attendance(current_user: User = Depends(get_current_user), db: Sessi
 
         result.append({
 
+            "id": r.id,
             "employee_name": r.user.full_name,
             "login_time": r.login_time.isoformat() if r.login_time else "",
             "logout_time": r.logout_time.isoformat() if r.logout_time else "",
@@ -431,6 +449,24 @@ def get_all_attendance(current_user: User = Depends(get_current_user), db: Sessi
         })
 
     return {"attendance": result}
+
+@router.post("/admin/attendance/{attendance_id}/terminate")
+def terminate_attendance_session(attendance_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    attendance = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+    if not attendance:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+        
+    if attendance.logout_time:
+        return {"message": "Session is already terminated!"}
+        
+    from ist_helper import get_ist_now
+    attendance.logout_time = get_ist_now()
+    db.commit()
+    
+    return {"message": f"Successfully terminated {attendance.user.full_name}'s session."}
 
 
 @router.get("/admin/logs")
@@ -459,6 +495,55 @@ def get_all_logs(current_user: User = Depends(get_current_user), db: Session = D
         })
 
     return {"logs": result}
+
+@router.get("/admin/export-excel")
+def export_excel(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        users = db.query(User).all()
+        pd.DataFrame([{ "ID": u.id, "Username": u.username, "Full Name": u.full_name, "Email": u.email, "Is Admin": u.is_admin } for u in users]).to_excel(writer, sheet_name="Users", index=False)
+        
+        attendance = db.query(Attendance).all()
+        pd.DataFrame([{ "ID": a.id, "Employee": a.user.full_name, "Login Time": a.login_time.isoformat() if a.login_time else "", "Logout Time": a.logout_time.isoformat() if a.logout_time else "", "IP": a.local_ip, "MAC": a.mac_address } for a in attendance]).to_excel(writer, sheet_name="Attendance", index=False)
+        
+        leaves = db.query(LeaveRequest).all()
+        pd.DataFrame([{ "ID": l.id, "Employee": l.user.full_name, "Type": l.leave_type, "Reason": l.reason, "Start": l.start_date.isoformat() if l.start_date else "", "End": l.end_date.isoformat() if l.end_date else "", "Status": l.status } for l in leaves]).to_excel(writer, sheet_name="Leaves", index=False)
+        
+        logs = db.query(AppLog).all()
+        pd.DataFrame([{ "ID": l.id, "Employee": l.user.full_name, "Timestamp": l.timestamp.isoformat() if l.timestamp else "", "App Name": l.app_name, "Window Title": l.raw_title } for l in logs]).to_excel(writer, sheet_name="App Logs", index=False)
+        
+    output.seek(0)
+    
+    # Store timestamp for 2-minute deletion lock using in-memory dictionary
+    if not hasattr(request.app.state, "last_export_time"):
+        request.app.state.last_export_time = {}
+    request.app.state.last_export_time[current_user.id] = get_ist_now()
+    
+    return StreamingResponse(
+        output, 
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+        headers={"Content-Disposition": f"attachment; filename=sahastra_export_{get_ist_now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+    )
+
+@router.delete("/admin/logs")
+def delete_all_logs(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    if not hasattr(request.app.state, "last_export_time") or current_user.id not in request.app.state.last_export_time:
+        raise HTTPException(status_code=400, detail="You must export to Excel first before deleting logs.")
+        
+    last_export = request.app.state.last_export_time[current_user.id]
+    diff = get_ist_now() - last_export
+    if diff.total_seconds() > 120:
+        raise HTTPException(status_code=400, detail="Export expired. You must export again within 2 minutes to delete logs.")
+        
+    db.query(AppLog).delete()
+    db.commit()
+    return {"message": "All application logs have been successfully deleted."}
 
 @router.get("/admin/actual-attendance")
 def get_actual_attendance(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -494,7 +579,7 @@ def get_actual_attendance(current_user: User = Depends(get_current_user), db: Se
 def get_attendance_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     import calendar
     
-    now = datetime.datetime.utcnow()
+    now = get_ist_now()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
     # Get all attendance records for this month

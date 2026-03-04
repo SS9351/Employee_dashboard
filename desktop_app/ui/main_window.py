@@ -272,6 +272,23 @@ class DashboardWindow(QWidget):
         vbox = QVBoxLayout()
         vbox.setSpacing(10)
 
+        # Global Admin Actions
+        top_actions = QHBoxLayout()
+        top_actions.addWidget(QLabel("<b>Admin Portal Actions:</b>"))
+        top_actions.addStretch()
+        
+        btn_export = QPushButton("Export to Excel")
+        btn_export.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 5px;")
+        btn_export.clicked.connect(self.admin_export_excel)
+        top_actions.addWidget(btn_export)
+        
+        btn_delete_logs = QPushButton("Delete All Logs")
+        btn_delete_logs.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; padding: 5px;")
+        btn_delete_logs.clicked.connect(self.admin_delete_logs)
+        top_actions.addWidget(btn_delete_logs)
+        
+        vbox.addLayout(top_actions)
+
         # Internal Admin Tabs
         self.admin_tabs = QTabWidget()
         
@@ -314,8 +331,8 @@ class DashboardWindow(QWidget):
         hdr2.addWidget(self.att_emp_filter)
         att_lay.addLayout(hdr2)
         
-        self.admin_att_table = QTableWidget(0, 5)
-        self.admin_att_table.setHorizontalHeaderLabels(["Employee", "Login Time", "Logout Time", "IP Address", "MAC Address"])
+        self.admin_att_table = QTableWidget(0, 6)
+        self.admin_att_table.setHorizontalHeaderLabels(["Employee", "Login Time", "Logout Time", "IP Address", "MAC Address", "Action"])
         self.admin_att_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         att_lay.addWidget(self.admin_att_table)
         
@@ -505,9 +522,23 @@ class DashboardWindow(QWidget):
             for i, r in enumerate(att):
                 self.admin_att_table.setItem(i, 0, QTableWidgetItem(r.get("employee_name")))
                 self.admin_att_table.setItem(i, 1, QTableWidgetItem(r.get("login_time")))
-                self.admin_att_table.setItem(i, 2, QTableWidgetItem(r.get("logout_time")))
+                
+                logout_time = r.get("logout_time")
+                self.admin_att_table.setItem(i, 2, QTableWidgetItem(logout_time or "Active Session"))
                 self.admin_att_table.setItem(i, 3, QTableWidgetItem(r.get("ip")))
                 self.admin_att_table.setItem(i, 4, QTableWidgetItem(r.get("mac_address", "")))
+                
+                if not logout_time:
+                    action_widget = QWidget()
+                    btn_lay = QHBoxLayout(action_widget)
+                    btn_lay.setContentsMargins(0, 0, 0, 0)
+                    btn_term = QPushButton("Terminate")
+                    btn_term.setStyleSheet("background-color: #e74c3c; color: white;")
+                    btn_term.clicked.connect(lambda checked, aid=r.get("id"): self.admin_terminate_session(aid))
+                    btn_lay.addWidget(btn_term)
+                    self.admin_att_table.setCellWidget(i, 5, action_widget)
+                else:
+                    self.admin_att_table.setItem(i, 5, QTableWidgetItem("-"))
             self.filter_admin_attendance()
 
     def load_admin_logs(self):
@@ -580,3 +611,37 @@ class DashboardWindow(QWidget):
             self.load_admin_resets()
         else:
             QMessageBox.warning(self, "Error", "Failed to approve request.")
+
+    def admin_terminate_session(self, attendance_id):
+        reply = QMessageBox.question(self, "Confirm Termination", "Are you sure you want to forcibly terminate this active session?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            data, status = self.api_client.terminate_session(attendance_id)
+            if status == 200:
+                QMessageBox.information(self, "Success", data.get("message", "Session terminated."))
+                self.load_admin_attendance()
+                self.load_actual_attendance()
+            else:
+                QMessageBox.warning(self, "Error", data.get("detail", "Failed to terminate session"))
+
+    def admin_export_excel(self):
+        content, status = self.api_client.export_excel()
+        if status == 200 and content:
+            import os
+            from PyQt6.QtWidgets import QFileDialog
+            filepath, _ = QFileDialog.getSaveFileName(self, "Save Export", "sahastra_export.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                with open(filepath, 'wb') as f:
+                    f.write(content)
+                QMessageBox.information(self, "Success", "Export saved successfully! You now have 2 minutes to delete logs if required.")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to export data from server.")
+
+    def admin_delete_logs(self):
+        reply = QMessageBox.question(self, "WARNING: DELETE LOGS", "This will permanently delete ALL tracked application logs.\nYou must have exported to Excel in the last 2 minutes.\nProceed?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            data, status = self.api_client.delete_logs()
+            if status == 200:
+                QMessageBox.information(self, "Success", "All application logs have been successfully deleted.")
+                self.load_admin_logs()
+            else:
+                QMessageBox.warning(self, "Error", data.get("detail", "Failed to delete logs. Ensure you exported to Excel first."))

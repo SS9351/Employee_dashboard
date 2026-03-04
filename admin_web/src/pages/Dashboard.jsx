@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Users, Clock, FileText, KeyRound } from 'lucide-react';
-import api from '../api';
+import { LogOut, Users, Clock, FileText, KeyRound, Download, Trash2 } from 'lucide-react';
+import api, { adminApi } from '../api';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -75,6 +75,45 @@ export default function Dashboard() {
         } catch (err) { alert('Failed to approve request.'); }
     };
 
+    const handleTerminateSession = async (id) => {
+        if (!window.confirm("Are you sure you want to forcibly terminate this user's active session?")) return;
+        try {
+            await adminApi.terminateSession(id);
+            fetchData();
+        } catch (err) { alert(err.response?.data?.detail || 'Failed to terminate session.'); }
+    };
+
+    const handleToggleAdminStatus = async (userId) => {
+        if (!window.confirm("Are you sure you want to toggle this user's admin privilege?")) return;
+        try {
+            await adminApi.toggleAdmin(userId);
+            fetchData();
+        } catch (err) { alert(err.response?.data?.detail || 'Failed to toggle admin status.'); }
+    };
+
+    const handleExportExcel = async () => {
+        try {
+            const response = await adminApi.exportToExcel();
+            // Create a blob link to trigger a native download
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `sahastra_export_${new Date().getTime()}.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.parentNode.removeChild(link);
+        } catch (err) { alert('Failed to export to Excel.'); }
+    };
+
+    const handleDeleteLogs = async () => {
+        if (!window.confirm("WARNING: This will permanently delete ALL application logs! You MUST have exported them to Excel in the last 2 minutes. Proceed?")) return;
+        try {
+            const res = await adminApi.deleteLogs();
+            alert(res.data.message);
+            fetchData();
+        } catch (err) { alert(err.response?.data?.detail || 'Failed to delete logs. Did you forget to Export first?'); }
+    };
+
     // Helper Filter Method
     const filterData = (dataList, key) => {
         if (empFilter === 'All Employees') return dataList;
@@ -82,11 +121,12 @@ export default function Dashboard() {
     };
 
     const tabs = [
+        { id: 'Users', label: 'All Employees', icon: <Users size={18} /> },
         { id: 'Leaves', label: 'Leave Management', icon: <FileText size={18} /> },
         { id: 'Actual', label: 'Actual Attendance', icon: <Clock size={18} /> },
         { id: 'Attendance', label: 'Live Sessions', icon: <Users size={18} /> },
         { id: 'Logs', label: 'Application Logs', icon: <FileText size={18} /> },
-        { id: 'Resets', label: 'User Management', icon: <KeyRound size={18} /> },
+        { id: 'Resets', label: 'Password Resets', icon: <KeyRound size={18} /> },
     ];
 
     return (
@@ -131,6 +171,12 @@ export default function Dashboard() {
                             <option>All Employees</option>
                             {users.map(u => <option key={u.id}>{u.full_name || u.username}</option>)}
                         </select>
+                        <button className="refresh-btn" style={{ backgroundColor: '#10b981' }} onClick={handleExportExcel}>
+                            <Download size={16} /> Export
+                        </button>
+                        <button className="refresh-btn" style={{ backgroundColor: '#ef4444' }} onClick={handleDeleteLogs}>
+                            <Trash2 size={16} /> Delete Logs
+                        </button>
                         <button className="refresh-btn" onClick={fetchData} disabled={loading}>
                             {loading ? 'Syncing...' : 'Refresh Data'}
                         </button>
@@ -196,7 +242,7 @@ export default function Dashboard() {
                                 <>
                                     <thead>
                                         <tr>
-                                            <th>Employee</th><th>Login Time</th><th>Logout Time</th><th>IP Address</th><th>MAC Address</th>
+                                            <th>Employee</th><th>Login Time</th><th>Logout Time</th><th>IP Address</th><th>MAC Address</th><th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -207,6 +253,11 @@ export default function Dashboard() {
                                                 <td>{at.logout_time || 'Active Session'}</td>
                                                 <td>{at.ip}</td>
                                                 <td>{at.mac_address}</td>
+                                                <td>
+                                                    {!at.logout_time ? (
+                                                        <button className="btn-danger" onClick={() => handleTerminateSession(at.id)}>Terminate</button>
+                                                    ) : '-'}
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -251,6 +302,37 @@ export default function Dashboard() {
                                                     {rs.status === 'PENDING' ? (
                                                         <button className="btn-success" onClick={() => handleApproveReset(rs.id)}>Approve Reset</button>
                                                     ) : '-'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </>
+                            )}
+
+                            {activeTab === 'Users' && (
+                                <>
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th><th>Full Name</th><th>Username</th><th>Status</th><th>Admin Privilege</th><th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {users.map((u, i) => (
+                                            <tr key={i}>
+                                                <td>{u.id}</td>
+                                                <td>{u.full_name || '-'}</td>
+                                                <td>{u.username}</td>
+                                                <td>{u.is_active ? 'Active' : 'Inactive'}</td>
+                                                <td style={{ fontWeight: 'bold', color: u.is_admin ? '#10b981' : '#64748b' }}>
+                                                    {u.is_admin ? 'Administrator' : 'Standard'}
+                                                </td>
+                                                <td>
+                                                    <button
+                                                        className={u.is_admin ? "btn-danger" : "btn-success"}
+                                                        onClick={() => handleToggleAdminStatus(u.id)}
+                                                    >
+                                                        {u.is_admin ? 'Revoke Admin' : 'Make Admin'}
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}

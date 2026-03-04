@@ -14,7 +14,7 @@ class Application(QApplication):
         super().__init__(sys_argv)
         self.setStyleSheet(MAIN_STYLE)
         
-        self.api_client = APIClient(base_url="http://127.0.0.1:8000") # Assume EC2 endpoint or local test
+        self.api_client = APIClient(base_url="https://employee-dashboard-iler.onrender.com") # Assume EC2 endpoint or local test
         self.device_info = get_device_info()
         self.tracker = ActivityTracker()
         

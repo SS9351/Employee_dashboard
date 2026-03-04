@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, T
 from sqlalchemy.orm import relationship
 import datetime
 from database import Base
+from ist_helper import get_ist_now
 
 class User(Base):
     __tablename__ = "users"
@@ -24,7 +25,7 @@ class Attendance(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    login_time = Column(DateTime, default=datetime.datetime.utcnow)
+    login_time = Column(DateTime, default=get_ist_now)
     logout_time = Column(DateTime, nullable=True)
     
     # Device fingerprint
@@ -67,7 +68,7 @@ class PasswordResetRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    request_date = Column(DateTime, default=datetime.datetime.utcnow)
+    request_date = Column(DateTime, default=get_ist_now)
     status = Column(String(50), default="PENDING") # PENDING, APPROVED, COMPLETED
     
     user = relationship("User", back_populates="password_resets")

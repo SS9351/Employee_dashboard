@@ -2,7 +2,7 @@ import os
 import requests
 
 class APIClient:
-    def __init__(self, base_url="https://employee-dashboard-iler.onrender.com/api"): # Hosted on Render
+    def __init__(self, base_url="https://employee-dashboard-iler.onrender.com"): # Hosted on Render
         self.base_url = base_url
         self.token = None
 
@@ -17,7 +17,8 @@ class APIClient:
 
     def test_connection(self):
         try:
-            r = requests.get(f"{self.base_url}/health", timeout=3)
+            domain = self.base_url.replace('/api', '')
+            r = requests.get(f"{domain}/health", timeout=5)
             return r.status_code == 200
         except:
             return False
@@ -150,6 +151,34 @@ class APIClient:
     def get_admin_actual_attendance(self):
         try:
             response = requests.get(f"{self.base_url}/api/admin/actual-attendance", headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+
+    def toggle_admin(self, user_id):
+        try:
+            response = requests.post(f"{self.base_url}/api/admin/users/{user_id}/toggle-admin", headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+
+    def terminate_session(self, attendance_id):
+        try:
+            response = requests.post(f"{self.base_url}/api/admin/attendance/{attendance_id}/terminate", headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+
+    def export_excel(self):
+        try:
+            response = requests.get(f"{self.base_url}/api/admin/export-excel", headers=self._headers(), stream=True)
+            return response.content, response.status_code
+        except Exception as e:
+            return None, 500
+
+    def delete_logs(self):
+        try:
+            response = requests.delete(f"{self.base_url}/api/admin/logs", headers=self._headers())
             return response.json(), response.status_code
         except Exception as e:
             return {"error": str(e)}, 500
