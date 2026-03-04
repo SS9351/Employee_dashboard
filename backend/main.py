@@ -36,7 +36,9 @@ def setup_admin():
         seed_employees.seed_users()
         return {"status": "success", "message": "Admin user and all 6 Employee accounts firmly injected into live production database."}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        import traceback
+        err = traceback.format_exc()
+        return {"status": "error", "message": str(e), "traceback": err}
 
 if __name__ == "__main__":
     import uvicorn
