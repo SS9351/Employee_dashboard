@@ -8,11 +8,17 @@ app = FastAPI(title="Sahastra Attendance Backend")
 
 @app.on_event("startup")
 def startup_event():
-    # Create DB Schema safely after app boot
+    # Attempt to create DB Schema safely after app boot
     try:
+        from database import engine
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         print(f"Failed to create schema automatically: {e}")
+        try:
+            from database import engine
+            engine.dispose() # Free up the hung connection thread!
+        except:
+            pass
 
 app.add_middleware(
     CORSMiddleware,
