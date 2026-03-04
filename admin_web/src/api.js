@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // When deployed to cloud, change this to the production URL.
-const API_URL = '/api';
+const API_URL = 'https://employee-dashboard-iler.onrender.com/api';
 
 const api = axios.create({
     baseURL: API_URL,
