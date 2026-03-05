@@ -53,6 +53,60 @@ function StatPieChart({ stats }) {
     );
 }
 
+function AttendanceCalendar({ calendarDays }) {
+    if (!calendarDays) return null;
+
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+
+    const blanks = Array.from({ length: firstDayIndex }, (_, i) => (
+        <div key={`blank-${i}`} className="calendar-day empty"></div>
+    ));
+
+    const getStatusClass = (statusStr) => {
+        if (!statusStr) return "future";
+        if (statusStr.includes("Present")) return "present";
+        if (statusStr.includes("Leave")) return "leave";
+        return "absent";
+    };
+
+    const days = Array.from({ length: daysInMonth }, (_, i) => {
+        const dayNum = i + 1;
+        // Format YYYY-MM-DD local time match
+        const localDate = new Date(year, month, dayNum);
+        const isoString = localDate.toLocaleDateString("en-CA"); // Gets YYYY-MM-DD format reliably
+        const status = calendarDays[isoString];
+
+        return (
+            <div key={`day-${dayNum}`} className={`calendar-day ${getStatusClass(status)}`}>
+                <span>{dayNum}</span>
+                <span style={{ fontSize: '10px', marginTop: '4px' }}>{status ? status.split(' ')[0] : ''}</span>
+            </div>
+        );
+    });
+
+    const monthName = today.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    return (
+        <div className="calendar-widget">
+            <div style={{ textAlign: 'center', marginBottom: '15px', color: '#2c3e50', fontWeight: 'bold' }}>
+                {monthName}
+            </div>
+            <div className="calendar-header">
+                <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+            </div>
+            <div className="calendar-grid">
+                {blanks}
+                {days}
+            </div>
+        </div>
+    );
+}
+
 export default function EmployeeDashboard() {
     const [activeTab, setActiveTab] = useState('Overview');
     const [stats, setStats] = useState({ present: 0, absent: 0, approved_leaves: 0 });
@@ -178,10 +232,16 @@ export default function EmployeeDashboard() {
 
                 <div className="emp-content-grid">
                     {activeTab === 'Overview' && (
-                        <div className="glass-panel emp-card">
-                            <h2>Monthly Attendance Breakdown</h2>
-                            <StatPieChart stats={stats} />
-                        </div>
+                        <>
+                            <div className="glass-panel emp-card">
+                                <h2>Monthly Attendance Breakdown</h2>
+                                <StatPieChart stats={stats} />
+                            </div>
+                            <div className="glass-panel emp-card">
+                                <h2>Daily Log Calendar</h2>
+                                <AttendanceCalendar calendarDays={stats.calendar_days} />
+                            </div>
+                        </>
                     )}
 
                     {activeTab === 'Leaves' && (
