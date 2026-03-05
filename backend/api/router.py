@@ -617,10 +617,22 @@ def get_attendance_stats(current_user: User = Depends(get_current_user), db: Ses
     total_active = present_count + approved_leave_count
     absent_count = max(0, days_passed - total_active)
     
+    # Build complete calendar days struct for frontend Calendar
+    calendar_days = {}
+    for day_num in range(1, days_passed + 1):
+        check_date = start_of_month.date().replace(day=day_num)
+        
+        if check_date in present_days:
+            calendar_days[check_date.isoformat()] = "Present"
+        elif check_date in approved_leave_days:
+            calendar_days[check_date.isoformat()] = "Approved Leave"
+        else:
+            calendar_days[check_date.isoformat()] = "Absent"
+            
     return {
         "present": present_count,
         "absent": absent_count,
         "approved_leaves": approved_leave_count,
-        "total_days_so_far": days_passed
+        "total_days_so_far": days_passed,
+        "calendar_days": calendar_days
     }
-
