@@ -636,12 +636,3 @@ def get_attendance_stats(current_user: User = Depends(get_current_user), db: Ses
         "total_days_so_far": days_passed,
         "calendar_days": calendar_days
     }
-
-@router.get("/admin/wipe-database-danger")
-def wipe_database_danger(db: Session = Depends(get_db)):
-    db.query(Attendance).delete()
-    db.query(LeaveRequest).delete()
-    db.query(AppLog).delete()
-    db.query(PasswordResetRequest).delete()
-    db.commit()
-    return {"message": "ALL OPERATIONAL DATA WIPED"}
