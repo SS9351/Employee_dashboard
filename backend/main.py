@@ -12,6 +12,16 @@ def startup_event():
     try:
         from database import engine
         Base.metadata.create_all(bind=engine)
+        
+        # Auto-migrate new columns
+        from sqlalchemy import text
+        with engine.begin() as conn:
+            try:
+                conn.execute(text("ALTER TABLE attendances ADD COLUMN manual_status VARCHAR(50)"))
+                print("Successfully added manual_status column.")
+            except Exception as e:
+                print("Column 'manual_status' might already exist or failed:", e)
+                
     except Exception as e:
         print(f"Failed to create schema automatically: {e}")
         try:
