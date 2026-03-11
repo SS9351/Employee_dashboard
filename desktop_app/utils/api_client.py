@@ -141,9 +141,12 @@ class APIClient:
             
     # --- Attendance Stats ---
 
-    def get_attendance_stats(self):
+    def get_attendance_stats(self, month=None, year=None):
         try:
-            response = requests.get(f"{self.base_url}/api/attendance/stats", headers=self._headers())
+            params = {}
+            if month: params["month"] = month
+            if year: params["year"] = year
+            response = requests.get(f"{self.base_url}/api/attendance/stats", params=params, headers=self._headers())
             return response.json(), response.status_code
         except Exception as e:
             return {"error": str(e)}, 500
@@ -151,6 +154,31 @@ class APIClient:
     def get_admin_actual_attendance(self):
         try:
             response = requests.get(f"{self.base_url}/api/admin/actual-attendance", headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+            
+    def delete_attendance(self, attendance_id):
+        try:
+            response = requests.delete(f"{self.base_url}/api/admin/attendance/{attendance_id}", headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+            
+    def add_manual_attendance(self, user_id, date_str, status):
+        try:
+            payload = {"user_id": user_id, "date": date_str, "status": status}
+            response = requests.post(f"{self.base_url}/api/admin/attendance/manual", json=payload, headers=self._headers())
+            return response.json(), response.status_code
+        except Exception as e:
+            return {"error": str(e)}, 500
+            
+    def get_admin_user_stats(self, user_id, month=None, year=None):
+        try:
+            params = {}
+            if month: params["month"] = month
+            if year: params["year"] = year
+            response = requests.get(f"{self.base_url}/api/admin/attendance/user-stats/{user_id}", params=params, headers=self._headers())
             return response.json(), response.status_code
         except Exception as e:
             return {"error": str(e)}, 500

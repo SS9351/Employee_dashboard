@@ -555,7 +555,10 @@ def get_actual_attendance(current_user: User = Depends(get_current_user), db: Se
     
     result = []
     for r in records:
-        if r.login_time and r.logout_time:
+        if r.manual_status:
+            status = r.manual_status + " (Manual)"
+            duration_str = "-"
+        elif r.login_time and r.logout_time:
             duration = r.logout_time - r.login_time
             duration_hours = duration.total_seconds() / 3600.0
             status = "Present" if duration_hours >= 6 else "Absent (< 6 Hrs)"
@@ -565,10 +568,11 @@ def get_actual_attendance(current_user: User = Depends(get_current_user), db: Se
             status = "In Progress"
             
         result.append({
+            "id": r.id,
             "employee_name": r.user.full_name,
             "date": r.login_time.date().isoformat() if r.login_time else "",
-            "login_time": r.login_time.time().strftime("%H:%M:%S") if r.login_time else "",
-            "logout_time": r.logout_time.time().strftime("%H:%M:%S") if r.logout_time else "",
+            "login_time": r.login_time.time().strftime("%H:%M:%S") if r.login_time else "-",
+            "logout_time": r.logout_time.time().strftime("%H:%M:%S") if r.logout_time else "-",
             "duration": duration_str,
             "status": status
         })
@@ -576,16 +580,22 @@ def get_actual_attendance(current_user: User = Depends(get_current_user), db: Se
     return {"actual_attendance": result}
 
 @router.get("/attendance/stats")
-def get_attendance_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_attendance_stats(month: int = None, year: int = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     import calendar
     
     now = get_ist_now()
-    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if not month: month = now.month
+    if not year: year = now.year
+    if month < 1 or month > 12: month = now.month
+    
+    start_of_month = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+    end_of_month = (start_of_month + datetime.timedelta(days=32)).replace(day=1)
     
     # Get all attendance records for this month
     records = db.query(Attendance).filter(
         Attendance.user_id == current_user.id,
-        Attendance.login_time >= start_of_month
+        Attendance.login_time >= start_of_month,
+        Attendance.login_time < end_of_month
     ).all()
     
     # Track which days have "Present" status
@@ -619,20 +629,171 @@ def get_attendance_stats(current_user: User = Depends(get_current_user), db: Ses
     
     # Build complete calendar days struct for frontend Calendar
     calendar_days = {}
+    day_wise_list = []
+    
     for day_num in range(1, days_passed + 1):
         check_date = start_of_month.date().replace(day=day_num)
         
+        status_str = "Absent"
         if check_date in present_days:
-            calendar_days[check_date.isoformat()] = "Present"
+            status_str = "Present"
         elif check_date in approved_leave_days:
-            calendar_days[check_date.isoformat()] = "Approved Leave"
-        else:
-            calendar_days[check_date.isoformat()] = "Absent"
+            status_str = "Approved Leave"
+            
+        calendar_days[check_date.isoformat()] = status_str
+        day_wise_list.append({"date": check_date.isoformat(), "status": status_str})
+        
+    day_wise_list.reverse() # Show most recent first
             
     return {
         "present": present_count,
         "absent": absent_count,
         "approved_leaves": approved_leave_count,
         "total_days_so_far": days_passed,
-        "calendar_days": calendar_days
+        "calendar_days": calendar_days,
+        "day_wise": day_wise_list
     }
+
+@router.delete("/admin/attendance/{attendance_id}")
+def delete_attendance(attendance_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    att = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+        
+    db.delete(att)
+    db.commit()
+    return {"message": "Attendance record deleted successfully"}
+
+@router.post("/admin/attendance/manual")
+def add_manual_attendance(payload: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    user_id = payload.get("user_id")
+    date_str = payload.get("date") # "YYYY-MM-DD"
+    status = payload.get("status") # "Present" or "Absent"
+    
+    if not user_id or not date_str or not status:
+        raise HTTPException(status_code=400, detail="Missing fields")
+        
+    try:
+        att_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+        
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+        
+    # Create manual attendance record
+    att = Attendance(
+        user_id=user_id,
+        login_time=att_date,
+        logout_time=att_date, # Instant for manual
+        manual_status=status,
+        hostname="Manual Entry",
+        os_info="Admin Action",
+        mac_address="",
+        local_ip="",
+        public_ip="",
+        hardware_id="Admin"
+    )
+    
+    db.add(att)
+    db.commit()
+    return {"message": f"Successfully marked {target_user.full_name} as {status} for {date_str}"}
+
+@router.get("/admin/attendance/user-stats/{user_id}")
+def get_admin_user_stats(user_id: int, month: int = None, year: int = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    now = get_ist_now()
+    if not month: month = now.month
+    if not year: year = now.year
+    
+    # Simple validation
+    if month < 1 or month > 12: month = now.month
+    
+    try:
+        start_date = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        import calendar
+        if month == now.month and year == now.year:
+            days_passed = now.day
+        else:
+            days_passed = calendar.monthrange(year, month)[1]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date parameters")
+        
+    # Get all attendance records for this month
+    records = db.query(Attendance).filter(
+        Attendance.user_id == user_id,
+        Attendance.login_time >= start_date,
+        Attendance.login_time < (start_date + datetime.timedelta(days=32)).replace(day=1) # start of next month
+    ).all()
+    
+    present_days = set()
+    for r in records:
+        if r.manual_status == "Present":
+            if r.login_time: present_days.add(r.login_time.date())
+        elif r.login_time and r.logout_time and not r.manual_status:
+            duration_hours = (r.logout_time - r.login_time).total_seconds() / 3600.0
+            if duration_hours >= 6:
+                present_days.add(r.login_time.date())
+                
+    # Get approved leaves for this month
+    leaves = db.query(LeaveRequest).filter(
+        LeaveRequest.user_id == user_id,
+        LeaveRequest.status == "APPROVED",
+        LeaveRequest.start_date < (start_date + datetime.timedelta(days=32)).replace(day=1),
+        LeaveRequest.end_date >= start_date
+    ).all()
+    
+    approved_leave_days = set()
+    for lv in leaves:
+        current_date = lv.start_date
+        while current_date <= lv.end_date:
+            if current_date.month == month and current_date.year == year:
+                approved_leave_days.add(current_date.date())
+            current_date += datetime.timedelta(days=1)
+            
+    present_count = len(present_days)
+    approved_leave_count = len([d for d in approved_leave_days if d.day <= days_passed])
+    
+    total_active = present_count + approved_leave_count
+    absent_count = max(0, days_passed - total_active)
+    
+    day_wise_list = []
+    
+    for day_num in range(1, days_passed + 1):
+        check_date = start_date.date().replace(day=day_num)
+        
+        status_str = "Absent"
+        if check_date in present_days:
+            status_str = "Present"
+        elif check_date in approved_leave_days:
+            status_str = "Approved Leave"
+            
+        # Check specific manual entries
+        # If there's a manual absent entry, it might override others, but we handled that via the sets mostly
+        # Actually let's explicitly look for manual absent
+        for r in records:
+            if r.login_time and r.login_time.date() == check_date and r.manual_status == "Absent":
+                status_str = "Absent (Manual)"
+                break
+            
+        day_wise_list.append({"date": check_date.isoformat(), "status": status_str})
+        
+    day_wise_list.reverse() # Show most recent first
+            
+    return {
+        "present": present_count,
+        "absent": absent_count,
+        "approved_leaves": approved_leave_count,
+        "total_days_in_period": days_passed,
+        "day_wise": day_wise_list
+    }
+

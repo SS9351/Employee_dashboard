@@ -8,55 +8,44 @@ from PyQt6.QtCore import Qt, QDate, QRectF
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QPen
 from utils.paths import get_asset_path
 
-class AttendanceChartWidget(QWidget):
+class DayWiseAttendanceWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(400, 250)
-        self.stats = {"present": 0, "absent": 0, "approved_leaves": 0}
-
-    def update_stats(self, present, absent, leaves):
-        self.stats = {"present": present, "absent": absent, "approved_leaves": leaves}
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        total = sum(self.stats.values())
-        if total == 0:
-            painter.setPen(QPen(QColor("#7f8c8d"), 2))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No Data Available Yet For This Month")
-            return
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Summary labels
+        self.summary_lbl = QLabel("Present: 0 | Absent: 0 | Leaves: 0")
+        self.summary_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.summary_lbl)
+        
+        # Table
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["Date", "Status"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.table)
+        
+    def update_stats(self, present, absent, leaves, day_wise_list):
+        self.summary_lbl.setText(f"Monthly Summary - Present: {present} | Absent: {absent} | Approved Leaves: {leaves}")
+        
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(day_wise_list))
+        for i, row in enumerate(day_wise_list):
+            self.table.setItem(i, 0, QTableWidgetItem(row.get("date", "")))
             
-        colors = {
-            "present": QColor(46, 204, 113),         # Green
-            "absent": QColor(231, 76, 60),           # Red
-            "approved_leaves": QColor(241, 196, 15)  # Yellow
-        }
-        
-        rect = QRectF(20, 20, 210, 210)
-        start_angle = 0
-        
-        for key, val in self.stats.items():
-            if val > 0:
-                span_angle = int((val / total) * 360 * 16)
-                painter.setBrush(colors[key])
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawPie(rect, start_angle, span_angle)
-                start_angle += span_angle
+            status_str = row.get("status", "")
+            item = QTableWidgetItem(status_str)
+            if "Present" in status_str:
+                item.setForeground(QColor(46, 204, 113))
+            elif "Absent" in status_str:
+                item.setForeground(QColor(231, 76, 60))
+            elif "Leave" in status_str:
+                item.setForeground(QColor(241, 196, 15))
                 
-        # Draw Legend
-        legend_x = 250
-        legend_y = 60
-        for key, color in colors.items():
-            painter.setBrush(color)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(legend_x, legend_y, 15, 15)
-            painter.setPen(QPen(Qt.GlobalColor.black))
-            painter.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-            readable_key = key.replace("_", " ").title()
-            painter.drawText(legend_x + 25, legend_y + 13, f"{readable_key}: {self.stats[key]} Days")
-            legend_y += 35
+            self.table.setItem(i, 1, item)
 
 class DashboardWindow(QWidget):
     def __init__(self, api_client, device_info, user_info=None):
@@ -137,7 +126,20 @@ class DashboardWindow(QWidget):
         cl2 = QVBoxLayout()
         cl2.addWidget(QLabel("<b>My Monthly Attendance Overview:</b>"))
         
-        self.chart_widget = AttendanceChartWidget()
+        # Month Filter
+        filter_lay = QHBoxLayout()
+        filter_lay.addWidget(QLabel("Select Month:"))
+        self.emp_month_filter = QComboBox()
+        import datetime
+        for i in range(1, 13):
+            self.emp_month_filter.addItem(datetime.date(1900, i, 1).strftime('%B'), i)
+        self.emp_month_filter.setCurrentIndex(datetime.datetime.now().month - 1)
+        self.emp_month_filter.currentIndexChanged.connect(self.load_attendance_stats)
+        filter_lay.addWidget(self.emp_month_filter)
+        filter_lay.addStretch()
+        cl2.addLayout(filter_lay)
+        
+        self.chart_widget = DayWiseAttendanceWidget()
         cl2.addWidget(self.chart_widget)
         
         ref_stats = QPushButton("Refresh Stats")
@@ -156,12 +158,14 @@ class DashboardWindow(QWidget):
         return tab
 
     def load_attendance_stats(self):
-        data, status = self.api_client.get_attendance_stats()
+        month = self.emp_month_filter.currentData()
+        data, status = self.api_client.get_attendance_stats(month=month)
         if status == 200:
             self.chart_widget.update_stats(
                 data.get("present", 0),
                 data.get("absent", 0),
-                data.get("approved_leaves", 0)
+                data.get("approved_leaves", 0),
+                data.get("day_wise", [])
             )
 
     def create_leaves_tab(self):
@@ -394,17 +398,54 @@ class DashboardWindow(QWidget):
         actual_tab = QWidget()
         act_lay = QVBoxLayout(actual_tab)
         
+        # Manual Entry Form
+        man_group = QFrame()
+        man_group.setObjectName("Card")
+        man_lay = QHBoxLayout(man_group)
+        man_lay.addWidget(QLabel("<b>Mark Manual Attendance:</b>"))
+        
+        self.manual_user_combo = QComboBox()
+        man_lay.addWidget(self.manual_user_combo)
+        
+        self.manual_date = QDateEdit()
+        self.manual_date.setCalendarPopup(True)
+        self.manual_date.setDate(QDate.currentDate())
+        man_lay.addWidget(self.manual_date)
+        
+        self.manual_status = QComboBox()
+        self.manual_status.addItems(["Present", "Absent"])
+        man_lay.addWidget(self.manual_status)
+        
+        btn_manual = QPushButton("Submit Details")
+        btn_manual.setStyleSheet("background-color: #f39c12; color: white;")
+        btn_manual.clicked.connect(self.admin_submit_manual)
+        man_lay.addWidget(btn_manual)
+        
+        act_lay.addWidget(man_group)
+        
+        # Filters
         hdr5 = QHBoxLayout()
-        hdr5.addWidget(QLabel("<b>Actual Attendance Metrics (> 6 Hrs = Present)</b>"))
+        hdr5.addWidget(QLabel("<b>Actual Attendance Records</b>"))
         hdr5.addStretch()
         hdr5.addWidget(QLabel("Filter by Employee:"))
         self.actual_emp_filter = QComboBox()
         self.actual_emp_filter.currentIndexChanged.connect(self.filter_actual_attendance)
         hdr5.addWidget(self.actual_emp_filter)
+        
+        hdr5.addWidget(QLabel("Month:"))
+        self.actual_month_filter = QComboBox()
+        import datetime
+        self.actual_month_filter.addItem("All Months", 0)
+        for i in range(1, 13):
+            self.actual_month_filter.addItem(datetime.date(1900, i, 1).strftime('%B'), i)
+        self.actual_month_filter.setCurrentIndex(0) # All
+        self.actual_month_filter.currentIndexChanged.connect(self.filter_actual_attendance)
+        hdr5.addWidget(self.actual_month_filter)
+        
         act_lay.addLayout(hdr5)
         
-        self.admin_actual_table = QTableWidget(0, 6)
-        self.admin_actual_table.setHorizontalHeaderLabels(["Date", "Employee", "Login Time", "Logout Time", "Duration", "Final Status"])
+        self.admin_actual_table = QTableWidget(0, 7)
+        self.admin_actual_table.setHorizontalHeaderLabels(["Date", "Employee", "Login Time", "Logout Time", "Duration", "Final Status", "Action"])
         self.admin_actual_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         act_lay.addWidget(self.admin_actual_table)
         
@@ -439,6 +480,13 @@ class DashboardWindow(QWidget):
                     name = u.get("full_name") or u.get("username")
                     combo.addItem(name)
                 combo.blockSignals(False)
+                
+            self.manual_user_combo.blockSignals(True)
+            self.manual_user_combo.clear()
+            for u in users:
+                name = u.get("full_name") or u.get("username")
+                self.manual_user_combo.addItem(name, u.get("id"))
+            self.manual_user_combo.blockSignals(False)
 
     def filter_table_by_employee(self, table, combo, emp_col=0):
         selected_emp = combo.currentText()
@@ -464,7 +512,32 @@ class DashboardWindow(QWidget):
         self.filter_table_by_employee(self.admin_resets_table, self.resets_emp_filter, 1)
 
     def filter_actual_attendance(self):
-        self.filter_table_by_employee(self.admin_actual_table, self.actual_emp_filter, 1)
+        selected_emp = self.actual_emp_filter.currentText()
+        selected_month = self.actual_month_filter.currentData()
+        
+        for row in range(self.admin_actual_table.rowCount()):
+            hidden = False
+            
+            # Employee filter
+            if selected_emp and selected_emp != "All Employees":
+                item_emp = self.admin_actual_table.item(row, 1) # Employee is col 1
+                if item_emp and item_emp.text() != selected_emp:
+                    hidden = True
+                    
+            # Month filter
+            if selected_month != 0 and not hidden:
+                item_date = self.admin_actual_table.item(row, 0) # Date is col 0
+                if item_date:
+                    date_str = item_date.text() # YYYY-MM-DD
+                    if date_str:
+                        try:
+                            month_str = date_str.split('-')[1]
+                            if int(month_str) != selected_month:
+                                hidden = True
+                        except:
+                            pass
+                            
+            self.admin_actual_table.setRowHidden(row, hidden)
 
     def load_admin_leaves(self):
         data, status = self.api_client.get_admin_leaves()
@@ -602,7 +675,49 @@ class DashboardWindow(QWidget):
                 elif "Absent" in status_str:
                     status_item.setForeground(QColor(231, 76, 60)) # Red
                 self.admin_actual_table.setItem(i, 5, status_item)
+                
+                # Action Button
+                action_widget = QWidget()
+                btn_lay = QHBoxLayout(action_widget)
+                btn_lay.setContentsMargins(0, 0, 0, 0)
+                btn_del = QPushButton("Delete")
+                btn_del.setStyleSheet("background-color: #e74c3c; color: white;")
+                btn_del.clicked.connect(lambda checked, aid=r.get("id"): self.admin_delete_actual_attendance(aid))
+                btn_lay.addWidget(btn_del)
+                self.admin_actual_table.setCellWidget(i, 6, action_widget)
+                
             self.filter_actual_attendance()
+
+    def admin_submit_manual(self):
+        user_id = self.manual_user_combo.currentData()
+        date_str = self.manual_date.date().toString(Qt.DateFormat.ISODate)
+        status_val = self.manual_status.currentText()
+        if not user_id: 
+            QMessageBox.warning(self, "Error", "Please select a valid user.")
+            return
+            
+        reply = QMessageBox.question(self, "Confirm", f"Mark {status_val} for {self.manual_user_combo.currentText()} on {date_str}?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            data, status = self.api_client.add_manual_attendance(user_id, date_str, status_val)
+            if status == 200:
+                QMessageBox.information(self, "Success", data.get("message", "Success"))
+                self.load_actual_attendance()
+            else:
+                QMessageBox.warning(self, "Error", data.get("detail", "Failed to mark attendance."))
+
+    def admin_delete_actual_attendance(self, attendance_id):
+        if not attendance_id:
+            QMessageBox.warning(self, "Error", "Cannot delete this record.")
+            return
+            
+        reply = QMessageBox.question(self, "Confirm Deletion", "Are you sure you want to permanently delete this attendance record?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            data, status = self.api_client.delete_attendance(attendance_id)
+            if status == 200:
+                QMessageBox.information(self, "Success", data.get("message", "Record deleted."))
+                self.load_actual_attendance()
+            else:
+                QMessageBox.warning(self, "Error", data.get("detail", "Failed to delete record."))
 
     def admin_approve_reset(self, request_id):
         data, req_status = self.api_client.approve_reset_request(request_id)

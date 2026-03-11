@@ -28,6 +28,8 @@ class Attendance(Base):
     login_time = Column(DateTime, default=get_ist_now)
     logout_time = Column(DateTime, nullable=True)
     
+    manual_status = Column(String(50), nullable=True) # "Present" or "Absent" (if set manually)
+    
     # Device fingerprint
     hostname = Column(String(100))
     os_info = Column(String(500))
